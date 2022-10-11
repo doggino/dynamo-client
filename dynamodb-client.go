@@ -194,21 +194,24 @@ func (r *DynamoDbClient) GetItemList(key Key, arrayOfField string, queryOption Q
 		ScanIndexForward:          scanIndexForward,
 	}
 
-	if queryOption.Filter != nil {
+	if nil != queryOption.Filter {
 		filterExpression, _ := processQueryOptionFilter(queryOption.Filter, expressionAttributeValues, expressionAttributeNames)
 		input.FilterExpression = aws.String(filterExpression)
 	}
 
-	if queryOption.Page != nil && reflect.ValueOf(queryOption.Page.LastEvaluatedKey).Len() > 0 {
-		LastEvaluatedKey, err := attributevalue.MarshalMap(queryOption.Page.LastEvaluatedKey)
-		if err != nil {
-			return nil, nil, err
-		}
-		input.ExclusiveStartKey = LastEvaluatedKey
-	}
-
-	if queryOption.Page != nil {
+	if nil != queryOption.Page {
 		input.Limit = aws.Int32(int32(queryOption.Page.PageSize))
+
+		if reflect.ValueOf(queryOption.Page.LastEvaluatedKey).Len() > 0 {
+			var lastEvaluatedKey map[string]types.AttributeValue
+
+			lastEvaluatedKey, err = attributevalue.MarshalMap(queryOption.Page.LastEvaluatedKey)
+			if err != nil {
+				return
+			}
+
+			input.ExclusiveStartKey = lastEvaluatedKey
+		}
 	}
 
 	if key.IndexName != nil {
@@ -218,93 +221,104 @@ func (r *DynamoDbClient) GetItemList(key Key, arrayOfField string, queryOption Q
 	if arrayOfField != "" {
 		temp := strings.Split(arrayOfField, ",")
 		tempArrayOfField := make([]string, len(temp))
+
 		for i, v := range temp {
 			expressionAttributeNames[fmt.Sprintf("#%s", v)] = strings.ReplaceAll(v, "#", "")
 			tempArrayOfField[i] = fmt.Sprintf("#%s", v)
 		}
+
 		input.ProjectionExpression = aws.String(strings.Join(tempArrayOfField, ","))
 	}
 
+query:
 	output, err = r.dynamoDb.Query(context.TODO(), input)
 	if err != nil {
 		return
 	}
-	if len(output.Items) < 1 {
-		err = errors.New(fmt.Sprintf("item not found (%s)", util.StructToString(key)))
-		return
-	}
-	LastEvaluatedKey := new(map[string]interface{})
-	if output.LastEvaluatedKey != nil {
+
+	//if len(output.Items) < 1 {
+	//	err = errors.New(fmt.Sprintf("item not found (%s)", util.StructToString(key)))
+	//	return
+	//}
+
+	if nil != output.LastEvaluatedKey {
+		LastEvaluatedKey := new(map[string]interface{})
 		if err = attributevalue.UnmarshalMap(output.LastEvaluatedKey, &LastEvaluatedKey); err != nil {
 			return
 		}
 		lastEvaluatedKey = LastEvaluatedKey
 	}
-	items = output.Items
+
+	items = append(items, output.Items...)
+
+	if nil != queryOption.Page && queryOption.Page.AllInOne && nil != output.LastEvaluatedKey {
+		goto query
+	}
+
 	return
 }
 
-func (r *DynamoDbClient) GetCountList(key Key, arrayOfField string, queryOption QueryOption) (total uint64, err error) {
-	var output *dynamodb.QueryOutput
-	var expressionAttributeValues map[string]types.AttributeValue
-	var keyConditionExpression string
-
-	expressionAttributeValues = make(map[string]types.AttributeValue)
-	expressionAttributeValues[":gsipk"] = &types.AttributeValueMemberS{Value: *key.PK}
-
-	keyConditionExpression = fmt.Sprintf("#%sPK = :gsipk", *key.IndexName)
-
-	if nil != key.SK {
-		expressionAttributeValues[":gsisk"] = &types.AttributeValueMemberS{Value: *key.SK}
-		if strings.HasSuffix(*key.SK, "#") {
-			keyConditionExpression = fmt.Sprintf("#%sPK = :gsipk and begins_with(#%sSK, :gsisk)", *key.IndexName, *key.IndexName)
-		} else {
-			keyConditionExpression = fmt.Sprintf("#%sPK = :gsipk and #%sSK = :gsisk", *key.IndexName, *key.IndexName)
-		}
-	}
-
-	expressionAttributeNames := make(map[string]string)
-	expressionAttributeNames[fmt.Sprintf("#%sPK", *key.IndexName)] = fmt.Sprintf("%sPK", *key.IndexName)
-	expressionAttributeNames[fmt.Sprintf("#%sSK", *key.IndexName)] = fmt.Sprintf("%sSK", *key.IndexName)
-
-	input := &dynamodb.QueryInput{
-		ExpressionAttributeNames:  expressionAttributeNames,
-		ExpressionAttributeValues: expressionAttributeValues,
-		KeyConditionExpression:    aws.String(keyConditionExpression),
-		TableName:                 aws.String(r.tableName),
-	}
-
-	if queryOption.Filter != nil {
-		filterExpression, _ := processQueryOptionFilter(queryOption.Filter, expressionAttributeValues, expressionAttributeNames)
-		input.FilterExpression = aws.String(filterExpression)
-	}
-
-	if key.IndexName != nil {
-		input.IndexName = key.IndexName
-	}
-
-	if arrayOfField != "" {
-		temp := strings.Split(arrayOfField, ",")
-		tempArrayOfField := make([]string, len(temp))
-		for i, v := range temp {
-			expressionAttributeNames[fmt.Sprintf("#%s", v)] = strings.ReplaceAll(v, "#", "")
-			tempArrayOfField[i] = fmt.Sprintf("#%s", v)
-		}
-		input.ProjectionExpression = aws.String(strings.Join(tempArrayOfField, ","))
-	}
-
-	output, err = r.dynamoDb.Query(context.TODO(), input)
-	if err != nil {
-		return
-	}
-	if len(output.Items) < 1 {
-		total = 0
-		return
-	} else {
-		total = uint64(len(output.Items))
-	}
-	return
-}
+//func (r *DynamoDbClient) GetCountList(key Key, arrayOfField string, queryOption QueryOption) (total uint64, err error) {
+//	var output *dynamodb.QueryOutput
+//	var expressionAttributeValues map[string]types.AttributeValue
+//	var keyConditionExpression string
+//
+//	expressionAttributeValues = make(map[string]types.AttributeValue)
+//	expressionAttributeValues[":gsipk"] = &types.AttributeValueMemberS{Value: *key.PK}
+//
+//	keyConditionExpression = fmt.Sprintf("#%sPK = :gsipk", *key.IndexName)
+//
+//	if nil != key.SK {
+//		expressionAttributeValues[":gsisk"] = &types.AttributeValueMemberS{Value: *key.SK}
+//		if strings.HasSuffix(*key.SK, "#") {
+//			keyConditionExpression = fmt.Sprintf("#%sPK = :gsipk and begins_with(#%sSK, :gsisk)", *key.IndexName, *key.IndexName)
+//		} else {
+//			keyConditionExpression = fmt.Sprintf("#%sPK = :gsipk and #%sSK = :gsisk", *key.IndexName, *key.IndexName)
+//		}
+//	}
+//
+//	expressionAttributeNames := make(map[string]string)
+//	expressionAttributeNames[fmt.Sprintf("#%sPK", *key.IndexName)] = fmt.Sprintf("%sPK", *key.IndexName)
+//	expressionAttributeNames[fmt.Sprintf("#%sSK", *key.IndexName)] = fmt.Sprintf("%sSK", *key.IndexName)
+//
+//	input := &dynamodb.QueryInput{
+//		ExpressionAttributeNames:  expressionAttributeNames,
+//		ExpressionAttributeValues: expressionAttributeValues,
+//		KeyConditionExpression:    aws.String(keyConditionExpression),
+//		TableName:                 aws.String(r.tableName),
+//	}
+//
+//	if queryOption.Filter != nil {
+//		filterExpression, _ := processQueryOptionFilter(queryOption.Filter, expressionAttributeValues, expressionAttributeNames)
+//		input.FilterExpression = aws.String(filterExpression)
+//	}
+//
+//	if key.IndexName != nil {
+//		input.IndexName = key.IndexName
+//	}
+//
+//	if arrayOfField != "" {
+//		temp := strings.Split(arrayOfField, ",")
+//		tempArrayOfField := make([]string, len(temp))
+//		for i, v := range temp {
+//			expressionAttributeNames[fmt.Sprintf("#%s", v)] = strings.ReplaceAll(v, "#", "")
+//			tempArrayOfField[i] = fmt.Sprintf("#%s", v)
+//		}
+//		input.ProjectionExpression = aws.String(strings.Join(tempArrayOfField, ","))
+//	}
+//
+//	output, err = r.dynamoDb.Query(context.TODO(), input)
+//	if err != nil {
+//		return
+//	}
+//	if len(output.Items) < 1 {
+//		total = 0
+//		return
+//	} else {
+//		total = uint64(len(output.Items))
+//	}
+//	return
+//}
 
 func (r *DynamoDbClient) GetItem(key Key) (item map[string]types.AttributeValue, err error) {
 	if nil == key.IndexName {
