@@ -203,14 +203,14 @@ func (r *DynamoDbClient) GetItemList(key Key, arrayOfField string, queryOption Q
 		input.Limit = aws.Int32(int32(queryOption.Page.PageSize))
 
 		if reflect.ValueOf(queryOption.Page.LastEvaluatedKey).Len() > 0 {
-			var lastEvaluatedKey map[string]types.AttributeValue
+			var _lastEvaluatedKey map[string]types.AttributeValue
 
-			lastEvaluatedKey, err = attributevalue.MarshalMap(queryOption.Page.LastEvaluatedKey)
+			_lastEvaluatedKey, err = attributevalue.MarshalMap(queryOption.Page.LastEvaluatedKey)
 			if err != nil {
 				return
 			}
 
-			input.ExclusiveStartKey = lastEvaluatedKey
+			input.ExclusiveStartKey = _lastEvaluatedKey
 		}
 	}
 
