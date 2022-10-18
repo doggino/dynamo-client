@@ -199,7 +199,7 @@ func (r *DynamoDbClient) GetItemList(key Key, arrayOfField string, queryOption Q
 		input.FilterExpression = aws.String(filterExpression)
 	}
 
-	if nil != queryOption.Page {
+	if nil != queryOption.Page && !queryOption.Page.AllInOne {
 		input.Limit = aws.Int32(int32(queryOption.Page.PageSize))
 
 		if reflect.ValueOf(queryOption.Page.LastEvaluatedKey).Len() > 0 {
